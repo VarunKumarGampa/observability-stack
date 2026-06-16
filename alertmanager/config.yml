@@ -1,0 +1,63 @@
+global:
+  # how long to wait before declaring an alert resolved
+  resolve_timeout: 5m
+
+# ── Routing tree ───────────────────────────────────────────────
+# Every alert starts at the root route and matches down
+route:
+  # group alerts by alert name and severity
+  # so 10 alerts with same name become 1 notification
+  group_by: ["alertname", "severity"]
+
+  # wait 30 seconds to collect more alerts before sending
+  # prevents alert storms where you get 50 messages at once
+  group_wait: 30s
+
+  # wait 5 minutes before sending a new group of alerts
+  group_interval: 5m
+
+  # repeat the same alert every 4 hours if still firing
+  repeat_interval: 4h
+
+  # default receiver if no child route matches
+  receiver: "console-log"
+
+  # child routes — more specific routing rules
+  routes:
+    # critical alerts go to a different receiver
+    - match:
+        severity: critical
+      receiver: "console-log-critical"
+      # repeat critical alerts more frequently
+      repeat_interval: 1h
+
+    # warning alerts use the default receiver
+    - match:
+        severity: warning
+      receiver: "console-log"
+
+# ── Receivers ─────────────────────────────────────────────────
+# A receiver is a destination for alerts
+# For now we use console logging (no Slack account needed)
+# Later you can add Slack/email by replacing these
+receivers:
+  - name: "console-log"
+    webhook_configs:
+      - url: "http://alertmanager:9093/api/v1/alerts"
+        send_resolved: true
+
+  - name: "console-log-critical"
+    webhook_configs:
+      - url: "http://alertmanager:9093/api/v1/alerts"
+        send_resolved: true
+
+# ── Inhibition rules ──────────────────────────────────────────
+# If the app is completely down (critical), suppress the warning
+# alerts that are caused BY it being down
+# No point getting "high latency" alert if the app is already down
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname"]
