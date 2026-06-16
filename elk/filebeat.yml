@@ -1,0 +1,31 @@
+# ── What Filebeat collects ─────────────────────────────────────
+filebeat.inputs:
+  # Watch all Docker container log files
+  # Docker stores container logs here on the host machine
+  - type: container
+    paths:
+      - /var/lib/docker/containers/*/*.log
+
+    # Only collect logs from our flask-app container
+    # Without this filter, Filebeat would collect logs from
+    # ALL containers including Prometheus, Grafana etc
+    processors:
+      - add_docker_metadata:
+          host: "unix:///var/run/docker.sock"
+
+      # Parse the JSON log message from Flask
+      - decode_json_fields:
+          fields: ["message"]
+          target: ""
+          overwrite_keys: true
+
+# ── Where Filebeat sends logs ──────────────────────────────────
+# Send to Logstash for processing, not directly to Elasticsearch
+# This way Logstash can enrich and transform the logs first
+output.logstash:
+  hosts: ["logstash:5044"]
+
+# ── Logging ───────────────────────────────────────────────────
+# Keep Filebeat's own logs minimal so they don't clutter things
+logging.level: warning
+logging.to_files: false
