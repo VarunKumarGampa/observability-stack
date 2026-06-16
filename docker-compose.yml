@@ -1,0 +1,211 @@
+version: "3.8"
+
+# All containers talk to each other through this network
+networks:
+  monitoring:
+    driver: bridge
+
+# Persistent storage so data survives container restarts
+volumes:
+  prometheus-data:
+  grafana-data:
+  elasticsearch-data:
+
+services:
+  # ────────────────────────────────────────────────────────────
+  # YOUR FLASK APPLICATION
+  # This is the app we are monitoring
+  # ────────────────────────────────────────────────────────────
+  flask-app:
+    build: ./app # build from our Dockerfile
+    container_name: flask-app
+    ports:
+      - "5000:5000" # localhost:5000 → container:5000
+    networks:
+      - monitoring
+    restart: unless-stopped # restart if it crashes
+
+  # ────────────────────────────────────────────────────────────
+  # PROMETHEUS
+  # Scrapes metrics from flask-app, node-exporter, cadvisor
+  # ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # our config file tells Prometheus what to scrape
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # our alert rules file
+      - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+      # persistent storage so metrics survive restarts
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle" # allows config reload without restart
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - flask-app # start after flask-app is up
+
+  # ────────────────────────────────────────────────────────────
+  # ALERTMANAGER
+  # Receives alerts from Prometheus and routes them
+  # ────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/config.yml:/etc/alertmanager/config.yml
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # GRAFANA
+  # Connects to Prometheus and draws dashboards
+  # ────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # auto-configures Prometheus as a data source on startup
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # NODE EXPORTER — INFRASTRUCTURE LEVEL MONITORING
+  # Collects host machine metrics: CPU, memory, disk, network
+  # No config needed — works out of the box
+  # ────────────────────────────────────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # CADVISOR — CONTAINER LEVEL MONITORING
+  # Collects per-container metrics: CPU, memory, restarts
+  # Gives you visibility into each individual container
+  # ────────────────────────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      # needs access to Docker socket to read container stats
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # BLACKBOX EXPORTER — ENDPOINT LEVEL MONITORING
+  # Pings your app URLs from outside like a real user would
+  # Tells you: is this URL responding? How fast? Is cert valid?
+  # ────────────────────────────────────────────────────────────
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: blackbox-exporter
+    ports:
+      - "9115:9115"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # ELASTICSEARCH
+  # Stores all the logs from your Flask app
+  # ────────────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node # single node for local dev
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # limit RAM usage
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # LOGSTASH
+  # Receives logs from Filebeat, transforms them, sends to ES
+  # ────────────────────────────────────────────────────────────
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.13.0
+    container_name: logstash
+    volumes:
+      - ./elk/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5044:5044"
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # KIBANA
+  # Visual interface for searching and exploring logs in ES
+  # ────────────────────────────────────────────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # FILEBEAT
+  # Watches Docker container logs and ships them to Logstash
+  # This is what connects your Flask app logs to ELK
+  # ────────────────────────────────────────────────────────────
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.13.0
+    container_name: filebeat
+    user: root # needs root to read Docker logs
+    volumes:
+      - ./elk/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - monitoring
+    depends_on:
+      - logstash
+    restart: unless-stopped

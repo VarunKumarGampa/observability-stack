@@ -1,0 +1,65 @@
+global:
+  # scrape every 15 seconds by default
+  scrape_interval: 15s
+  # evaluate alert rules every 15 seconds
+  evaluation_interval: 15s
+
+# tells Prometheus where Alertmanager is
+# so it knows where to send alerts when rules fire
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# load our alert rules file
+rule_files:
+  - "alert-rules.yml"
+
+# ── what to scrape ─────────────────────────────────────────────
+scrape_configs:
+  # 1. APPLICATION LEVEL — your Flask app
+  # scrapes the /metrics endpoint we built in app.py
+  - job_name: "flask-app"
+    static_configs:
+      - targets: ["flask-app:5000"]
+    metrics_path: /metrics
+    scrape_interval: 10s # scrape more frequently for app metrics
+
+  # 2. INFRASTRUCTURE LEVEL — host machine
+  # node-exporter gives us CPU, memory, disk, network of the machine
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # 3. CONTAINER LEVEL — individual containers
+  # cadvisor gives us per-container CPU, memory, restarts
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metrics_path: /metrics
+
+  # 4. ENDPOINT LEVEL — blackbox monitoring
+  # pings your Flask endpoints from outside like a real user
+  # this catches issues even if /metrics is broken
+  - job_name: "blackbox"
+    metrics_path: /probe
+    params:
+      module: [http_2xx] # expect a 200 response
+    static_configs:
+      - targets:
+          - http://flask-app:5000/health
+          - http://flask-app:5000/api/products
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # 5. SELF MONITORING — prometheus monitors itself
+  # useful to know if Prometheus itself is healthy
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

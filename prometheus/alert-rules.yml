@@ -1,0 +1,80 @@
+groups:
+  - name: flask-app-alerts
+    interval: 30s
+    rules:
+      # ── P1 CRITICAL — app is completely down ──────────────────
+      # fires if Prometheus cannot scrape the app for 1 minute
+      - alert: FlaskAppDown
+        expr: up{job="flask-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Flask app is DOWN"
+          description: "Flask app has been unreachable for over 1 minute."
+
+      # ── P2 WARNING — too many errors ─────────────────────────
+      # fires if more than 5% of requests return 5xx errors
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{status_code=~"5.."}[5m])
+          /
+          rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error rate above 5%"
+          description: "Error rate is {{ humanizePercentage $value }} over last 5 mins."
+
+      # ── P2 WARNING — responses are slow ──────────────────────
+      # fires if 95% of requests take longer than 1 second
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 latency above 1 second"
+          description: "95th percentile latency is {{ humanizeDuration $value }}."
+
+      # ── P3 WARNING — endpoint is not responding ───────────────
+      # blackbox exporter fires this if an endpoint stops returning 200
+      - alert: EndpointDown
+        expr: probe_success{job="blackbox"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Endpoint not responding"
+          description: "{{ $labels.instance }} is not returning a 200 response."
+
+  # ── Infrastructure alerts ─────────────────────────────────────
+  - name: infrastructure-alerts
+    rules:
+      # fires if any container has been restarting repeatedly
+      - alert: ContainerRestarting
+        expr: |
+          rate(container_last_seen{name="flask-app"}[5m]) > 0
+          and
+          changes(container_start_time_seconds{name="flask-app"}[5m]) > 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container restarting repeatedly"
+          description: "flask-app container has restarted more than 2 times in 5 minutes."
+
+      # fires if host machine memory is above 85%
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory above 85%"
+          description: "Memory usage is {{ humanizePercentage $value }}."
