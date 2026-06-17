@@ -38,11 +38,11 @@ Prometheus → Alertmanager → Notifications
 | Node Exporter     | Host machine metrics           | Infrastructure   |
 | cAdvisor          | Per-container metrics          | Container        |
 | Blackbox Exporter | External endpoint probing      | Endpoint         |
-| Alertmanager      | Alert routing and grouping     | —                |
-| Elasticsearch     | Log storage and search         | —                |
-| Logstash          | Log parsing and enrichment     | —                |
-| Kibana            | Log visualisation              | —                |
-| Filebeat          | Filtered log shipping          | —                |
+| Alertmanager      | Alert routing and grouping     | -                |
+| Elasticsearch     | Log storage and search         | -                |
+| Logstash          | Log parsing and enrichment     | -                |
+| Kibana            | Log visualisation              | -                |
+| Filebeat          | Filtered log shipping          | -                |
 
 ## Dashboard
 
