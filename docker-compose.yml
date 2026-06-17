@@ -195,13 +195,26 @@ services:
   # FILEBEAT
   # Watches Docker container logs and ships them to Logstash
   # This is what connects your Flask app logs to ELK
+  #
+  # WINDOWS FIX: Docker Desktop mounts files from Windows with
+  # open permissions (-rwxrwxrwx), which Filebeat refuses to run
+  # with for security reasons. We mount the config as a ".orig"
+  # file, then copy it and fix permissions inside the Linux
+  # container before starting Filebeat for real.
   # ────────────────────────────────────────────────────────────
   filebeat:
     image: docker.elastic.co/beats/filebeat:8.13.0
     container_name: filebeat
-    user: root # needs root to read Docker logs
+    user: root # needs root to read Docker logs and chmod the config
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cp /usr/share/filebeat/filebeat.yml.orig /usr/share/filebeat/filebeat.yml
+        chmod go-w /usr/share/filebeat/filebeat.yml
+        chown root:root /usr/share/filebeat/filebeat.yml
+        exec filebeat -e
     volumes:
-      - ./elk/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./elk/filebeat.yml:/usr/share/filebeat/filebeat.yml.orig:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
