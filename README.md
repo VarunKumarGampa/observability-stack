@@ -255,5 +255,3 @@ After exporting the dashboard JSON and re-importing it on a fresh `docker-compos
 Python · Flask · Docker · Docker Compose · Kubernetes · Prometheus · Grafana · Elasticsearch · Logstash · Kibana · Filebeat · Alertmanager · PromQL · KQL
 
 ---
-
-Built as part of a hands-on DevOps upskilling project, targeting Azure DevOps Engineer roles in India.
